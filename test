@@ -1,0 +1,13 @@
+#!/usr/bin/env perl
+
+use JSON;
+use LWP::Simple;
+use Data::Dumper;
+
+#print "hello";
+$json_document = get("http://samples.openweathermap.org/data/2.5/weather?q=London,uk&appid=b6907d289e10d714a6e88b30761fae22");
+$json = JSON->new->utf8->decode($json_document);
+
+
+print Dumper $json;
+#print $json->{weather}->[0]->{id};
