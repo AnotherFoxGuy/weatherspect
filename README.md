@@ -1,6 +1,7 @@
-                              WeatherSpect v1.11
-                    by Kirk Baucom <kbaucom@schizoid.com>
-                          http://www.robobunny.com
+WeatherSpect v2.0
+----------------------
+by Kirk Baucom <kbaucom@schizoid.com>  
+http://www.robobunny.com  
 
 WeatherSpect provides a reasonably accurate simulation of what the
 weather looks like outside, in ASCII art. It includes rain, snow,
@@ -14,7 +15,7 @@ Installation
 
 WeatherSpect is a single perl script, so all you have to do is make sure
 it's executable and put it somewhere convenient, like /usr/local/bin or
-/usr/local/games. 
+/usr/local/games.
 
 Requirements
 ------------
