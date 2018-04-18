@@ -6,7 +6,7 @@
 # This script will produce an animation that simulates
 # the actual weather at your location. It requires the Term::Animation
 # module (available from www.cpan.org). The Term::Animation
-# module requires the Curses module. 
+# module requires the Curses module.
 #
 # The current version of this program is available at:
 #
@@ -32,12 +32,12 @@
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation; either version 2 of the License, or
 # (at your option) any later version.
-# 
+#
 # This program is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU General Public License for more details.
-# 
+#
 # You should have received a copy of the GNU General Public License along
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
@@ -47,10 +47,11 @@ use Term::Animation 2.5;
 
 use Curses;
 use Data::Dumper;
+use Time::Piece;
 use strict;
 use warnings;
 
-my $version = "1.11";
+my $version = "2.00";
 
 my %depth = (
 	gui			=> 0,
@@ -71,7 +72,7 @@ my %depth = (
 );
 
 # $conf contains informtion from the config file
-# $weather is a Weather::Underground instance
+# $weather is a Weather::OpenWeatherMap instance
 my ($conf, $weather) = initialize();
 
 # animation object
@@ -128,7 +129,7 @@ sub main {
 			my $in = getch();
 			$last_time = $time;
 			$time = time();
-			
+
 			if   ($in eq '-1') {}
 			elsif( $in eq 'q') { quit(); }   # Exit
 			elsif( $in eq 'r' || $in eq '9' ) { last; } # Redraw (will recreate all entities)
@@ -275,19 +276,25 @@ sub toggle_weather_report {
 		}
 	}
 
+
+  my $wind_std = sprintf("%s %s MPH", $current->{'wind_direction'}, $current->{'wind_milesperhour'});
+  my $wind_metric = sprintf("%s %s KPH", $current->{'wind_direction'}, $current->{'wind_kilometersperhour'});
+  my $temp_std = sprintf("%s F", $current->{'fahrenheit'});
+  my $temp_metric = sprintf("%s C", $current->{'celsius'});
+
 	my $format = "| %11s: %-${value_width}s |\n";
 	my $box_width = 2 + 12 + 1 + $value_width + 2;
 
 	my $wbox_image = box_header("Weather Report (w to close)", $box_width);
 
 	$wbox_image .= '|' . ' 'x($box_width-2) . "|\n";
-	$wbox_image .= sprintf($format, 'Wind', "$current->{'wind_milesperhour'} MPH / $current->{'wind_kilometersperhour'} KPH $current->{'wind_direction'}");
-	$wbox_image .= sprintf($format, 'Temperature', "$current->{'temperature_fahrenheit'} F / $current->{'temperature_celsius'} C");
-	$wbox_image .= sprintf($format, 'Clouds', $current->{'clouds'});
+	$wbox_image .= sprintf($format, 'Wind',        ($conf->{'display_units'} eq 'metric') ?  $wind_metric :  $wind_std);
+	$wbox_image .= sprintf($format, 'Temperature', ($conf->{'display_units'} eq 'metric') ?  $temp_metric :  $temp_std);
+	$wbox_image .= sprintf($format, 'Cloudiness', "$current->{'clouds'} %");
 	$wbox_image .= sprintf($format, 'Conditions', $current->{'conditions'});
 	$wbox_image .= sprintf($format, 'Humidity', "$current->{'humidity'} %");
-	$wbox_image .= sprintf($format, 'Dewpoint', "$current->{'dewpoint_fahrenheit'} F / $current->{'dewpoint_celsius'} C");
-	$wbox_image .= sprintf($format, 'Visibility', "$current->{'visibility_miles'} MI / $current->{'visibility_kilometers'} KM");
+	$wbox_image .= sprintf($format, 'Dewpoint', "$current->{'dewpoint_fahrenheit'} ");
+	$wbox_image .= sprintf($format, 'Visibility', "$current->{'visibility_miles'}");
 
 	$wbox_image .= '|' . ' 'x($box_width-2) . "|\n";
 	foreach my $event ('Sunrise', 'Sunset', 'Moonrise', 'Moonset', 'MoonPhase') {
@@ -298,7 +305,7 @@ sub toggle_weather_report {
 
 	$wbox_image .= '|' . ' 'x($box_width-2) . "|\n";
 	$wbox_image .= sprintf($format, 'Place', $current->{'place'});
-	$wbox_image .= sprintf($format, 'Updated', $current->{'updated'});
+	$wbox_image .= sprintf($format, 'Updated', $current->{'update_time'});
 
 	$wbox_image .= "'" . '-'x($box_width-2) . "'";
 
@@ -318,7 +325,7 @@ sub add_sign_data {
 	$pos[2]--; # on top of the sign
 	$s->new_entity(
 		name		=> 'signdata',
-		shape		=> gen_sign_data(time), 
+		shape		=> gen_sign_data(time),
 		position	=> \@pos,
 		callback_args	=> [ 0, 0, 0, $rotate_interval ],
 	);
@@ -355,13 +362,15 @@ sub update_weather {
 		wind_kilometersperhour
 	/;
 
+  dlog(Dumper($new_weather));
+
 	if(defined($new_weather)) {
 
-		foreach my $field (keys %{$new_weather->[0]}) {
-
+		foreach my $field (keys %{$new_weather}) {
 			# if the weather report doesn't contain any data for
 			# a field, put in a default value
-			my $new_value = $new_weather->[0]{$field};
+			my $new_value = $new_weather->{$field};
+
 			unless(defined($new_value)) {
 				if(exists($numeric{$field})) {
 					$new_value = 0;
@@ -375,7 +384,7 @@ sub update_weather {
 		$last_data_retr = time();
 
 		# we just want the time, the date is implied
-		($current->{'update_time'}) = ($current->{'updated'} =~ /^(\d+:\d+ \w\w \w+)/);
+		($current->{'update_time'}) = localtime($current->{'updated'})->hms;
 
 		set_precip_type();
 
@@ -588,12 +597,12 @@ sub celestial_position {
 	if(defined($rise) && $rise =~ /^(\d+):(\d+) (\w\w) (\w+)/) {
 		($rise_hr, $rise_min, $rise_am_pm) = ($1, $2, $3);
 	}
-	
+
 	my $rise_time = ($rise_hr * 60) + $rise_min;
 	if($rise_am_pm eq 'PM') {
 		$rise_time += $twelve_hours;
 	}
-	
+
 	# defaults in case the rise/set time is not defined for this location
 	my ($set_hr, $set_min, $set_am_pm) = (6, 0, ($entity->name() eq 'sun') ? 'PM' : 'AM');
 	if(defined($set) && $set =~ /^(\d+):(\d+) (\w\w) (\w+)/) {
@@ -710,18 +719,18 @@ sub gen_sign_data {
 	my $retr_time = sprintf('%d:%02d %s', $retr_hour, $retr_min, $retr_ampm);
 	if($ENV{'TZ'}) { $retr_time .= " $ENV{'TZ'}"; }
 
-	my $a_text = ($conf->{'temp_display'} eq 'metric') ? $temp_metric : $temp_std;
-	my $b_text = ($conf->{'temp_display'} eq 'standard') ? $temp_std : $temp_metric;
+	my $a_text = ($conf->{'display_units'} eq 'metric') ? $temp_metric : $temp_std;
+	my $b_text = ($conf->{'display_units'} eq 'imperial') ? $temp_std : $temp_metric;
 
-	$a_text .= ($conf->{'wind_display'} eq 'metric') ? " : $wind_metric" : " : $wind_std";
-	$b_text .= ($conf->{'wind_display'} eq 'standard') ? " : $wind_std" : " : $wind_metric";
+  $a_text .= ($conf->{'display_units'} eq 'metric') ? " : $wind_metric" : " : $wind_std";
+	$b_text .= ($conf->{'display_units'} eq 'imperial') ? " : $wind_std" : " : $wind_metric";
 
 	my $line1a = center($sign_width, $a_text) . "\n";
 	my $line1b = center($sign_width, $b_text) . "\n";
 	my $line2 = center($sign_width, sprintf("%s", $current->{'conditions'})) . "\n";
 
 	my $line3a = center($sign_width, sprintf("%s %% Humidity", $current->{'humidity'})) . "\n";
-	my $line3b = center($sign_width, sprintf("%s", $current->{'pressure'})) . "\n";
+	my $line3b = center($sign_width, sprintf("%s hPa", $current->{'pressure'})) . "\n";
 
 	my $line4a = center($sign_width, sprintf("%s", $current->{'place'})) . "\n";
 	my $line4b = center($sign_width, "Retrieved: $retr_time") . "\n";
@@ -879,7 +888,7 @@ sub forest_position {
 
 	# figure out how much room we've got
 	my $height_range = $max_height - $min_height;
-	
+
 	my $y = int(rand($height_range)) + $min_height;
 
 	my $z = $depth{'tree'} + $s->height - ($y + $entity_height);
@@ -1177,7 +1186,7 @@ q#
 #
 	);
 
-	
+
 	my %fruit_list = (	#    left	right	color
 		'apple'		=> [ '(',	')',	'R' ],
 		'cherry'	=> [ 'o',	'o',	'R' ],
@@ -1194,24 +1203,24 @@ q#
 	}
 
 	my $x = int(rand($s->width())) - 5;
-	
+
 	my $tree_height = 12;
 	#my $min_height = $conf->{'horizon_row'} + 5 - $tree_height;
 	#my $max_height = $s->height() - 5 - $tree_height;
 	#my $height_range = $max_height - $min_height;
 	#my $y = int(rand($height_range)) + $min_height;
-	
+
 	# the depth of the tree is based on its height on the screen
 	# higher = further away
 	#my $z = $depth{'tree'} + ($max_height - $y);
-	
+
 	my ($y, $z) = forest_position( $s, $tree_height );
 	my $birth = time();
 	if(defined($age)) { $birth -= $age; }
 	my $tree_ent = $s->new_entity(
-		shape         => \@tree, 
-		position      => [$x, $y, $z], 
-		callback      => \&animate_tree, 
+		shape         => \@tree,
+		position      => [$x, $y, $z],
+		callback      => \&animate_tree,
 		callback_args => { 'birth' => $birth, 'parent' => 0 },
 		color         => \@tree_mask,
 		auto_trans    => 1,
@@ -1242,7 +1251,7 @@ sub update_precip {
 		hail		=> 'WHITE',
 	);
 
-	my $precip_cloud = 
+	my $precip_cloud =
 q#
     .-.
  .-(   ).
@@ -1262,13 +1271,13 @@ q# |      |
 
 	my $lightning =
 q#
-    \/      
-     \      
-     /\     
-    /\ |    
-   |   \    
-  /    /\   
-  \   /  \  
+    \/
+     \
+     /\
+    /\ |
+   |   \
+  /    /\
+  \   /  \
 #;
 
 	my @rows = split("\n", $precip);
@@ -1544,11 +1553,11 @@ sub turkey_collision {
 	foreach my $col_obj (@{$collisions}) {
 		if($col_obj->type eq 'pumpkin') {
 			my ($px,$py,$pz) = $col_obj->position;
-			
+
 			if(abs(($x + 6) - $px) < 6) {
 				# pumpkin stuck on our head, just keep walking
 			} elsif($px < $x) {
-				# bounce forward	
+				# bounce forward
 				$turkey->position( $x + 5, $y, $z );
 			} else {
 				# bounce backward
@@ -1575,7 +1584,7 @@ q(
  {-.{.' {  ';-=-.`    /
   {._.{.;    '-=-   .'
    {_.-'?`'.__ __,-'
-            ||| 
+            |||
            .===,
 ),
 q(
@@ -1651,7 +1660,7 @@ sub turkey_schedule {
 		my $max = $entity_count * 100;
 		my $range = $max - $min;
 		my $scale = $range / (30**4);
-		return $min + ($scale * ($day**4)); 
+		return $min + ($scale * ($day**4));
 	} else {
 		# show the occasional turkey during the year
 		return 1;
@@ -1668,7 +1677,7 @@ sub ghost_schedule {
 		my $max = $entity_count * 100;
 		my $range = $max - $min;
 		my $scale = $range / (31**4);
-		return $min + ($scale * ($day**4)); 
+		return $min + ($scale * ($day**4));
 	} else {
 		# show the occasional ghost during the year
 		return 1;
@@ -1718,10 +1727,10 @@ q{
  \_.-._.-._)
 });
 
-	my $color_right = 
+	my $color_right =
 q{
- 
-       gg 
+
+       gg
         R
 
 
@@ -1777,7 +1786,7 @@ sub santa_schedule {
 		my $max = $entity_count * 100;
 		my $range = $max - $min;
 		my $scale = $range / (25**4);
-		return $min + ($scale * ($day**4)); 
+		return $min + ($scale * ($day**4));
 	} else {
 		# show the occasional santa during the year
 		return 1;
@@ -1807,7 +1816,7 @@ sub add_santa {
 ww ww  ww  ww
   ww     ww
    w    w
-   wgwwgw  K          
+   wgwwgw  K
            KKKKKKKKKKKKKKKKrrrrrrrrrrrrrrrrrrr
     1                        rr 2 3 4 5 6 rr
                                rrrrrrrrrrr
@@ -2075,7 +2084,7 @@ _<>_\_\<>/_/_<>_
 },
 q{
    _????_
-  /_/??\_\ 
+  /_/??\_\
     \\\//
 /\_\\\><//_/\
 \/ //><\\\ \/
@@ -2088,7 +2097,7 @@ q{
     .\:|:/.
 -=>>::>o<::<<=-
   _ '/:|:\' _
-   o\':|:'/o 
+   o\':|:'/o
       /o\
 },
 	);
@@ -2116,15 +2125,15 @@ sub ignite_blaze {
 	# decide whether to ignite something
 
 	# get a list of all entities
-	
+
 	# pick an entity at random to set on fire
 
 	# if it's already on fire, just give up. that should help throttle
 	# the fires if there are a lot of them
-	
+
 	# add flames
 	add_flames($s, undef);
-	
+
 }
 
 # make something appear to be on fire
@@ -2165,7 +2174,7 @@ sub add_snowman {
 	#ATTRIB tiny snowman: hjw
 	#ATTRIB small snowman: jgs
 	#ATTRIB large snowman: jgs
-	
+
 	my $tiny_snowman = q{
   _==_ _
 _,(",)|_|
@@ -2202,11 +2211,11 @@ RRRW K WRRR
       ___
     _|___|_
    '=/a a\='
-     \~_ / 
+     \~_ /
 _\__/ '-' \__/_
  /  \  o  /  \
-   / '---' \ 
-  |    o    | 
+   / '---' \
+  |    o    |
    \   o   /
     '-----'
 };
@@ -2214,11 +2223,11 @@ _\__/ '-' \__/_
       YYY
     YYYYYYY
    YYWc cWYY
-     Wyy W 
+     Wyy W
 BBBBW yyy WBBBB
  B  W  K  W  B
-   W WWWWW W 
-  W    K    W 
+   W WWWWW W
+  W    K    W
    W   K   W
     WWWWWWW
 };
@@ -2465,7 +2474,7 @@ cccccccc        YYYY
 
 	$s->new_entity(
 		shape		=> \@pacman,
-		position	=> [$b,$h,$z], 
+		position	=> [$b,$h,$z],
 		callback_args	=> [0, [@{$path1}, @{$path2}]],
 		die_offscreen	=> 1,
 		death_cb	=> \&random_entity,
@@ -2523,7 +2532,7 @@ _\|/
 q{
       RRRR
        B Y
-  
+
 
 
  YY YY
@@ -2656,7 +2665,7 @@ q{
 	);
 
 	my $right_mask = q{
-        
+
          CC R
 
 
@@ -2692,7 +2701,7 @@ R CC
 	}
 
 	my ($y, $z) = forest_position( $s, 5 );
-	
+
 	$s->new_entity(
 		shape		=> $shape,
 		position	=> [$h_pos, $y, $z],
@@ -3037,9 +3046,9 @@ q{
 },
 q{
            \\\
-            \\\  
+            \\\
              \\\
-               + 
+               +
           ___ /^\\\___??????????????_
          /|^+----\\\  |#___________//
        ( -+ |____|\\\ _______-----+/
@@ -3269,7 +3278,7 @@ q{
   `(0)     (0)
 });
 
-	my $mask_right = 
+	my $mask_right =
 q{
        B
       BBw
@@ -3300,7 +3309,7 @@ q{
  (0)     (0)'
 });
 
-	my $mask_left = 
+	my $mask_left =
 q{
        B
       wBB
@@ -3362,7 +3371,7 @@ sub add_knight {
 ,;' \    /-(.;,   )};
 
 	my $mask_top_right = q{
-       RRRRR 
+       RRRRR
            WWW
           W  W
           WWWW     yYy
@@ -3508,7 +3517,7 @@ q{
 	}
 
 	my ($y, $z) = forest_position( $s, 12 );
-	
+
 	$s->new_entity(
 		shape		=> $knight,
 		position	=> [$b, $y, $z],
@@ -3806,7 +3815,7 @@ q{
   w W  WWW  W w
   wWWWWWWWWWWWw
   www  KKK  www
-  RYR       RYR 
+  RYR       RYR
  RRRRR     RRRRR
 },
 q{
@@ -3917,13 +3926,13 @@ bbK w KbbbbK w Kb
    KKK      KKK
 } ], [
 q{
- cc 
+ cc
 c  ccccccccccccccccccccccccc
 cwwwww wwwww wwwww wwwww w cc
 cwwwww wwwww wwwww wwwwwwwwcc
 crrrrrrrrrrrrrrrrrrrrrrrwwwrc
 wccccKwKccccccccccccKwKcwwwcw
-}, 
+},
 q{
                           cc
  ccccccccccccccccccccccccc  c
@@ -4010,7 +4019,7 @@ YYYYY   YYYYY   YYYYY      yyyyy
 	}
 
 	my ($y, $z) = forest_position( $s, 7 );
-	
+
 	$s->new_entity(
 		shape		=> \@ducks,
 		position	=> [-36, $y, $z],
@@ -4312,10 +4321,10 @@ GG    ggg  GG
 	#                         begin     end       frames         duration
 	my $path1 = $s->gen_path( $b,$y,$z, $d,$y,$z, [1,0,0,1],     (2 * ($d - $b)) );
 	my $path2 = $s->gen_path( $d,$y,$z, $d,$y,$z, [2,2,3,3,2,2,4,4], 24 );
-	my $path3 = $s->gen_path( $d,$y,$z, $e,$y,$z, [1,0,0,1],     (2 * ($e - $d)) );	
-	
+	my $path3 = $s->gen_path( $d,$y,$z, $e,$y,$z, [1,0,0,1],     (2 * ($e - $d)) );
+
 	$s->new_entity(
-		shape		=> \@turtle, 
+		shape		=> \@turtle,
 		position	=> [ $b, $y, $z ],
 		callback_args	=> [0, [@{$path1}, @{$path2}, @{$path3}]],
 		die_offscreen	=> 1,
@@ -4409,7 +4418,7 @@ q#
 	my $path3 = $s->gen_path( $wl,$hl,$z2, $we,$he,$z1, [0,1,2,1], 'longest');
 
 	$s->new_entity(
-		shape		=> \@bird, 
+		shape		=> \@bird,
 		position	=> [$wb, $hb, $z1],
 		callback_args	=> [0, [@{$path1}, @{$path2}, @{$path3}]],
 		die_offscreen	=> 1,
@@ -4515,13 +4524,12 @@ sub default_config {
 	$conf->{'retr_interval'}  = 600;
 	$conf->{'tree_lifespan'}  = 3600;
 	$conf->{'frame_delay'}    = .2;
-	$conf->{'temp_display'}   = undef;
-	$conf->{'wind_display'}   = undef;
+	$conf->{'display_units'}  = 'imperial';
 	$conf->{'version'}        = $version;
 	$conf->{'color'}          = 1;
 	$conf->{'debug'}          = 0;
 	$conf->{'entities'}       = 2;
-	
+
 		return $conf;
 }
 
@@ -4559,7 +4567,7 @@ sub read_config {
 					$conf->{'tree_lifespan'} = $val;
 				} else { print STDERR "Invalid config entry: $field: $val\n"; }
 			} elsif($field eq 'timezone') {
-				# this field is pretty worthless, so i've removed it to cut down on 
+				# this field is pretty worthless, so i've removed it to cut down on
 				# clutter in the config file
 			} elsif($field eq 'frame_delay') {
 				if($val =~ /^\d*\.?\d+$/) {
@@ -4573,13 +4581,9 @@ sub read_config {
 				if($val =~ /^\d$/) {
 					$conf->{'color'} = $val;
 				} else { print STDERR "Invalid config entry: $field: $val\n"; }
-			} elsif($field eq 'temp_display') {
-				if($val =~ /^(metric|standard|both)$/i) {
-					$conf->{'temp_display'} = lc($val);
-				} else { print STDERR "Invalid config entry: $field: $val\n"; }
-			} elsif($field eq 'wind_display') {
-				if($val =~ /^(metric|standard|both)$/i) {
-					$conf->{'wind_display'} = lc($val);
+			} elsif($field eq 'display_units') {
+				if($val =~ /^(metric|imperial)$/i) {
+					$conf->{'display_units'} = lc($val);
 				} else { print STDERR "Invalid config entry: $field: $val\n"; }
 			} elsif($field eq 'entities') {
 				if($val =~ /^\d+$/) {
@@ -4623,22 +4627,12 @@ sub prompt_for_config {
 		$conf->{'location'} = query("Accepted formats for location:\n\tZipcode\n\tCity\n\tCity, State\n\tState\n\tCity, Country\n\tCountry\nYour Location:");
 	}
 
-	unless(defined($conf->{'temp_display'})) {
-		my $temp = query("Temperature ( (C)elsius, (F)ahrenheit, (B)oth )", 'B', '^[cCfFbB]');
+	unless(defined($conf->{'display_units'})) {
+		my $temp = query("Units format ( (M)etric, (I)mperial", 'I', '^[cCmM]');
 		$temp = substr($temp, 0, 1);
 		$temp = lc($temp);
-		if($temp eq 'c') { $conf->{'temp_display'} = 'metric'; }
-		elsif($temp eq 'f') { $conf->{'temp_display'} = 'standard'; }
-		elsif($temp eq 'b') { $conf->{'temp_display'} = 'both'; }
-	}
-
-	unless(defined($conf->{'wind_display'})) {
-		my $wind = query("Wind Speed ( (K)PH, (M)PH, (B)oth )", 'B', '^[kKmMbB]');
-                $wind = substr($wind, 0, 1);
-		$wind = lc($wind);
-		if($wind eq 'k') { $conf->{'wind_display'} = 'metric'; }
-		elsif($wind eq 'm') { $conf->{'wind_display'} = 'standard'; }
-		elsif($wind eq 'b') { $conf->{'wind_display'} = 'both'; }
+		if($temp eq 'c') { $conf->{'display_units'} = 'metric'; }
+		elsif($temp eq 'i') { $conf->{'display_units'} = 'imperial'; }
 	}
 
 	print "Creating config file in $config_file...\n";
@@ -4668,21 +4662,11 @@ sub initialize {
 
 	my $conf = read_config($config_file);
 
-	my $weather = Weather::Underground::Weatherspect->new(place => $conf->{'location'});
-
-	# if the location in the config file returns multiple results,
-	# make the user pick which one they want
-	unless($conf->{'debug'}) {
-		my $new_weather = $weather->get_weather();
-		if($#{$new_weather} > 0) {
-			print "The location in your config file ($conf->{'location'}) returned multiple\n";
-			print "results. To avoid this screen in the future, please change the\n";
-			print "location in your config file to one of the more specific entries\n";
-			print "listed below.\n\n";
-			$conf->{'location'} = choose_location($new_weather);
-			$weather = Weather::Underground::Weatherspect->new(place => $conf->{'location'});
-		}
-	}
+	my $weather = Weather::OpenWeatherMap::Weatherspect->new(
+    place => $conf->{'location'},
+    units => $conf->{'display_units'},
+    debug => 0,
+   );
 
 	return($conf, $weather);
 }
@@ -4691,11 +4675,10 @@ sub config_comments {
 	my ($field) = @_;
 	my %comments;
 
-	$comments{'version'}        = "the version of weatherspect this config was generated with";  
+	$comments{'version'}        = "the version of weatherspect this config was generated with";
 	$comments{'retr_interval'}  = "how often (in seconds) to attempt to retrieve weather data";
 	$comments{'tree_lifespan'}  = "how long (in seconds) trees should live";
-	$comments{'temp_display'}   = "how to display temperatures ( metric, standard or both )";
-	$comments{'wind_display'}   = "how to display wind speeds ( metric, standard or both )";
+	$comments{'display_units'}  = "Units format ( metric or imperial )";
 	$comments{'location'}       = "City / City, State / City, Country / Country";
 	$comments{'frame_delay'}    = "how long (in seconds) to sleep between frames";
 	$comments{'debug'}          = "run in debug mode (0 = no, 1 = yes)";
@@ -4825,7 +4808,7 @@ sub debug_weather {
 # write to the debug log
 sub dlog {
 	my ($mesg) = @_;
-	
+
 	open(D, ">>", "debug");
 	print D "$mesg\n";
 	close(D);
@@ -4836,92 +4819,96 @@ sub dlog {
 	}
 }
 
-################################################################################
-################################################################################
-# below is a copy of Weather::Underground with a few small modifications.
-# the format that Weather::Underground uses for reporting temperatures changed,
-# and I've been unable to contact the author of Weather::Underground. All of my
-# changes are prefixed with # kbaucom
 BEGIN {
-package Weather::Underground::Weatherspect;
 
-#
-# $Header: /cvsroot/weather::underground/Weather/Underground/Underground.pm,v 1.38 2005/09/25 19:22:02 mina Exp $
-#
+  package Weather::OpenWeatherMap::Weatherspect;
 
-use strict;
-use vars qw($VERSION $CGI $CGIVAR $MYNAME $DEBUG %MODULES);
-use LWP::Simple qw($ua get);
-use HTML::TokeParser;
-use Fcntl qw(:flock);
+  use strict;
+  use vars qw($VERSION $APIURL $APIURLQUERY $APIKEY $MYNAME $DEBUG $LOGFILE %MODULES);
+  use LWP::Simple qw($ua get);
+  use HTML::TokeParser;
+  use Fcntl qw(:flock);
 
-$VERSION = '3.02';
+  $VERSION = '1.00';
 
-#
-# GLOBAL Variables Assignments
-#
+  #
+  # GLOBAL Variables Assignments
+  #
 
-$CGI    = 'http://mobile.wunderground.com/cgi-bin/findweather/getForecast';
-$CGIVAR = 'query';
-$MYNAME = "Weather::Underground";
-$DEBUG  = 0;
+  $APIURL      = 'http://api.openweathermap.org/data/2.5/weather';
+  $APIURLQUERY = 'q';
+  $APIKEY      = 'c78e4c34294cc12661ddab8b5a6b35ad';
+  $MYNAME      = "Weather::OpenWeatherMap";
+  $DEBUG       = 0;
+  $LOGFILE     = 'log.txt';
 
-%MODULES = (
-	"Data::Dumper" => 0,
-	"Storable"     => 0,
-	"FreezeThaw"   => 0,
-);
+  %MODULES = (
+      "Data::Dumper" => 0,
+      "Storable"     => 0,
+      "FreezeThaw"   => 0,
+      "JSON"         => 0,
+  );
 
-foreach (keys %MODULES) {
-	eval { eval("require $_;") || die "$_ not found"; };
-	$MODULES{$_} = $@ ? 0 : 1;
-}
+  foreach ( keys %MODULES ) {
+      eval { eval("require $_;") || die "$_ not found"; };
+      $MODULES{$_} = $@ ? 0 : 1;
+  }
 
 =head1 NAME
 
-Weather::Underground - Perl extension for retrieving weather information from wunderground.com
+Weather::OpenWeatherMap - Perl extension
+for retrieving weather information from OpenWeatherMap . org
 
 =head1 SYNOPSIS
 
-	use Weather::Underground;
+use Weather::OpenWeatherMap;
 
-	$weather = Weather::Underground->new(
-		place => "Montreal, Canada",
-		debug => 0,
-		)
-		|| die "Error, could not create new weather object: $@\n";
+$weather = Weather::OpenWeatherMap->new(
+  place => "London",
+  debug => 0,
+) || die "Error, could not create new weather object: $@\n";
 
-	$arrayref = $weather->get_weather()
-		|| die "Error, calling get_weather() failed: $@\n";
+$arrayref = $weather->get_weather()
+|| die "Error, calling get_weather() failed: $@\n";
 
-	foreach (@$arrayref) {
-		print "MATCH:\n";
-		while (($key, $value) = each %{$_}) {
-			print "\t$key = $value\n";
-		}
-	}
+foreach (@$arrayref) {
+  print "MATCH:\n";
+  while ( ( $key, $value ) = each %{$_} ) {
+      print "\t$key = $value\n";
+  }
+}
 
 =head1 DESCRIPTION
 
-Weather::Underground is a perl module which provides a simple OO interface to retrieving weather data for a geographic location.  It does so by querying wunderground.com and parsing the returned results.
+Weather::OpenWeatherMap is a perl module which provides a simple OO interface
+to retrieving weather data
+for a geographic location
+. It does so by querying OpenWeatherMap
+. org
+and parsing the returned results
+.
 
 =head1 CONSTRUCTOR
 
 =over 4
 
-=item new(hash or hashref);
+=item new( hash or hashref );
 
-Creates and returns a new Weather::Underground object.
+Creates and returns a new Weather::OpenWeatherMap object .
 
-Takes either a hash (as the SYNOPSIS shows) or a hashref
+Takes either a hash( as the SYNOPSIS shows ) or a hashref
 
-Required keys in the hash:
+Required keys in the hash :
 
 =over 4
 
 =item place
 
-This key should be assigned the value of the geographical place you would like to retrieve the weather information for.  The format of specifying the place really depends on wunderground.com more than it depends on this perl module, however at the time of this writing they accept 'City', 'City, State', 'State', 'State, Country' and 'Country'.
+This key should be assigned the value of the geographical place you would
+like to retrieve the weather information
+for
+. The
+format of specifying the place really depends on OpenWeatherMap.org more than it depends on this perl module, however at the time of this writing they accept 'City', 'City, State', 'State', 'State, Country' and 'Country'.
 
 =back
 
@@ -4931,13 +4918,13 @@ Optional keys in the hash:
 
 =item cache_file
 
-This key should be assigned a file name to use as a cache.  The module will store and use data from that file instead of querying wunderground.com if cache_max_age has not been exceeded.
+This key should be assigned a file name to use as a cache.  The module will store and use data from that file instead of querying OpenWeatherMap.org if cache_max_age has not been exceeded.
 
 This key is ignored if the cache_max_age key is not supplied.
 
 =item cache_max_age
 
-This key should be assigned a numeric value which is the number of seconds after which any data in the cache_file will be considered too old and a new request will be made to wunderground.com
+This key should be assigned a numeric value which is the number of seconds after which any data in the cache_file will be considered too old and a new request will be made to OpenWeatherMap.org
 
 This key is ignored if the cache_file key is not supplied.
 
@@ -4959,7 +4946,7 @@ If the default timeout for the LWP::UserAgent request (180 seconds at the time o
 
 =item get_weather()
 
-This method is used to initiate the connection to wunderground.com, query their system, and parse the results or retrieve the results from the cache_file constructor key if appropriate.
+This method is used to initiate the connection to OpenWeatherMap.org, query their system, and parse the results or retrieve the results from the cache_file constructor key if appropriate.
 
 If no results are found, returns undef.
 
@@ -5077,10 +5064,10 @@ Due to the differences between single and multiple-location matches, some of the
 
 =item Example 2: Print the Celsius temperature of the first matching place
 
-	use Weather::Underground;
+	use Weather::OpenWeatherMap;
 
-	$weather = Weather::Underground->new(
-		place   =>      "Montreal",
+	$weather = Weather::OpenWeatherMap->new(
+		place   =>      "London",
 		debug           =>      0
 		)
 		|| die "Error, could not create new weather object: $@\n";
@@ -5100,591 +5087,319 @@ If the constructor or a method returns undef, the variable $@ will contain a tex
 
 =head1 AUTHOR
 
-Mina Naguib
-http://mina.naguib.ca
-mnaguib@cpan.org
 
 =head1 COPYRIGHT
 
-Copyright (C) 2002-2005 Mina Naguib.  All rights reserved.  Use is subject to the Perl license.
+Copyright (C) 2018 Edgar (Edgar@AnotherFoxGuy).  All rights reserved.  Use is subject to the Perl license.
 
 =cut
 
-#
-# Public methods:
-#
+    #
+    # Public methods:
+    #
 
-sub new {
+    sub new {
+    	my $class = shift;
+    	my $self;
+    	my %parameters;
+    	my $module;
+    	my $raw;
+    	my $cache;
+      my $units;
+    	local (*FH);
+
+    	if (ref($_[0]) eq "HASH") {
+    		%parameters = %{ $_[0] };
+    	}
+    	else {
+    		%parameters = @_;
+    	}
+
+    	$DEBUG = $parameters{debug};
+    	_debug("Creating a new $MYNAME object");
+    	if (!$parameters{place}) {
+    		_debug("ERROR: Location not specified");
+    		return undef;
+    	}
+
+      $units = $parameters{units};
+
+    	$self = {
+    		"place"   => $parameters{place},
+    		"timeout" => $parameters{timeout},
+    		"_url"    => $APIURL . '?' . $APIURLQUERY . '=' . $parameters{place} . '&APPID=' . $APIKEY . '&units=' . $units
+    	};
+    	bless($self, $class);
+    	return $self;
+    }
+
+    sub get_weather {
+    	my ($self) = @_;
+    	my $document;
+    	my $json;
+    	my $token;
+    	my %state;
+    	my $text;
+    	my $arrayref = [];
+    	my $oldagent;
+      my $cpoints;
+    	local (*FH);
+
+    	_debug("Getting weather info for " . $self->{place});
+
+    	_debug("Retrieving url " . $self->{_url});
+
+    	if ($self->{timeout}) {
+    		_debug("Setting timeout for LWP::Simple's LWP::UserAgent object to $self->{timeout}");
+    		$ua->timeout($self->{timeout});
+    	}
+    	$oldagent = $ua->agent();
+    	$ua->agent("Weather::OpenWeatherMap version $VERSION");
+    	$document = get($self->{_url});
+    	$ua->agent($oldagent);
+
+    	if (!$document) {
+    		_debug("Could not retrieve " . $self->{_url});
+    		return undef;
+    	}
+    	else {
+    		_debug("I retrieved the following data:\n\n\n\n\n$document\n\n\n\n\n");
+    	}
+
+
+      $json = JSON->new->utf8->decode($document);
+
+      if($json->{cod} != 200){
+      	_debug("API error:\n$json->{cod}\n$json->{message}\n");
+        return undef;
+      }
+
+
+      $cpoints = Compass::Points->new();
+
+      return {
+          place                  => $json->{name},
+          updated                => $json->{dt},
+          temperature_celsius    => $json->{main}->{temp},
+          temperature_fahrenheit => $json->{main}->{temp},
+          celsius                => $json->{main}->{temp},
+          fahrenheit             => $json->{main}->{temp},
+          humidity               => $json->{main}->{humidity},
+          dewpoint_celsius       => $json->{dt},
+          dewpoint_fahrenheit    => $json->{dt},
+          wind_direction         => $cpoints->deg2abbr($json->{wind}->{deg}),
+          wind_milesperhour      => $json->{wind}->{speed},
+          wind_kilometersperhour => $json->{wind}->{speed},
+          pressure               => $json->{main}->{pressure},
+          conditions             => $json->{weather}->[0]->{main},
+          visibility_miles       => $json->{visibility},
+          visibility_kilometers  => $json->{visibility},
+          clouds                 => $json->{clouds}->{all},
+          sunrise                => $json->{sys}->{sunrise},
+          sunset                 => $json->{sys}->{sunset},
+          moonrise               => $json->{dt},
+          moonset                => $json->{dt},
+          moonphase              => $json->{name},
+        };
+    }
+
+    ##################################################################################################################################
+    #
+    # Internal subroutines
+    #
+    sub _debug {
+    	my $notice = shift;
+    	$@ = $notice;
+    	if ($DEBUG) {
+        print "$MYNAME DEBUG NOTE: $notice\n";
+        open(my $fh, '>>', $LOGFILE) or die "Could not open file '$LOGFILE' $!";
+        print $fh "$MYNAME DEBUG NOTE: $notice\n";
+        close $fh;
+    		return 1;
+    	}
+    	return 0;
+    }
+
+
+    #
+    # Leave me alone:
+    #
+    1;
+
+}
+
+
+# From http://search.cpan.org/~janus/Compass-Points-0.02/lib/Compass/Points.pm
+BEGIN{
+package Compass::Points;
+
+use strict;
+use warnings;
+
+our $VERSION = "0.02";
+
+our @FIELDS = qw( abbr name );
+our @NAMES = (
+        [ N	=> "North"		],
+        [ NbE	=> "North by east"	],
+        [ NNE	=> "North-northeast"	],
+        [ NEbN	=> "Northeast by north"	],
+        [ NE	=> "Northeast"		],
+        [ NEbE	=> "Northeast by east"	],
+        [ ENE	=> "East-northeast"	],
+        [ EbN	=> "East by north"	],
+        [ E	=> "East"		],
+        [ EbS	=> "East by south"	],
+        [ ESE	=> "East-southeast"	],
+        [ SEbE	=> "Southeast by east"	],
+        [ SE	=> "Southeast"		],
+        [ SEbS	=> "Southeast by south"	],
+        [ SSE	=> "South-southeast"	],
+        [ SbE	=> "South by east"	],
+        [ S	=> "South"		],
+        [ SbW	=> "South by west"	],
+        [ SSW	=> "South-southwest"	],
+        [ SWbS	=> "Southwest by south"	],
+        [ SW	=> "Southwest"		],
+        [ SWbW	=> "Southwest by west"	],
+        [ WSW	=> "West-southwest"	],
+        [ WbS	=> "West by south"	],
+        [ W	=> "West"		],
+        [ WbN	=> "West by north"	],
+        [ WNW	=> "West-northwest"	],
+        [ NWbW	=> "Northwest by west"	],
+        [ NW	=> "Northwest"		],
+        [ NWbN	=> "Northwest by north"	],
+        [ NNW	=> "North-northwest"	],
+        [ NbW	=> "North by west"	],
+);
+our @GROUP;	# separate groups to assign different degree values
+our @INDEX;	# index per group
+our @MAP;	# mapping for easy access
+
+for my $n ( 0 .. 3 ) {
+	my $slice = 360 / ( 2 ** ( 2 + $n ) );		# 90, 45, 22.5, 11.25
+	my $mod = 2 ** ( 3 - $n );			# 8, 4, 2, 1
+	my @offs = grep $_ % $mod == 0, 0 .. $#NAMES;	# 0,8,16,24 0,4,8,12,...
+
+	$GROUP[ $n ] = bless( [], __PACKAGE__ );
+
+	for my $m ( 0 .. $#offs ) {
+		my @entry = @{ $NAMES[ $offs[ $m ] ] };
+
+		for my $key ( map lc, @entry ) {
+			$key =~ s![^a-z]!!g;
+
+			$INDEX[ $n ]{ $key } = \@entry;
+		}
+
+		$entry[ 2 ] = $m * $slice;
+
+		$GROUP[ $n ][ $m ] = \@entry;
+	}
+
+	$MAP[ $_ ] = $n for @MAP .. $#offs;
+}
+
+sub new
+{
 	my $class = shift;
-	my $self;
-	my %parameters;
-	my $module;
-	my $raw;
-	my $cache;
-	local (*FH);
+	my $number = shift || 16;
 
-	if (ref($_[0]) eq "HASH") {
-		%parameters = %{ $_[0] };
-	}
-	else {
-		%parameters = @_;
-	}
+	$number = @{ $GROUP[ $#GROUP ] }
+		if $number > @{ $GROUP[ $#GROUP ] };
 
-	$DEBUG = $parameters{debug};
-	_debug("Creating a new $MYNAME object");
-	if (!$parameters{place}) {
-		_debug("ERROR: Location not specified");
-		return undef;
-	}
-	$self = {
-		"place"   => $parameters{place},
-		"timeout" => $parameters{timeout},
-		"_url"    => $CGI . '?' . $CGIVAR . '=' . $parameters{place}
+	return $GROUP[ $MAP[ $number - 1 ] ];
+}
+
+for my $offset ( 0 .. $#FIELDS ) {
+	my $deg2sub = "deg2$FIELDS[ $offset ]";
+	my $sub2deg = "$FIELDS[ $offset ]2deg";
+
+	no strict qw( refs );
+
+	*$deg2sub = sub {
+		my $self = shift;
+		my $deg = abs( shift || 0 );
+
+		$deg -= 360 while $deg > 360;
+
+		my $slice = 360 / @$self;
+		my $index = ( $deg + $slice / 2 ) / $slice;
+
+		return $self->[ $index ][ $offset ];
 	};
-	if ($parameters{cache_max_age} && $parameters{cache_file}) {
 
-		#
-		# We've been requested to use caching - let's do sanity, then populate $module and $cache
-		#
-		if (!grep { $_ } values %MODULES) {
-			_debug("Error: Can not use cache_file when none of the needed serialization modules (" . join(" or ", keys %MODULES) . ") are installed");
-			return undef;
-		}
-		if ($parameters{cache_max_age} !~ /^[0-9.]+$/) {
-			_debug("Error: Supplied cache_max_age key must be a number");
-			return undef;
-		}
-		if (-f $parameters{cache_file}) {
+	*$sub2deg = sub {
+		my $self = shift;
+		my $key = lc( shift || "" );
+		my $index = $INDEX[ $MAP[ @$self - 1 ] ];
 
-			#
-			# The cache file already exists
-			#
-			if (!open(FH, $parameters{cache_file})) {
-				_debug("Error: Failed to open $parameters{cache_file} for reading: $!");
-				return undef;
-			}
-			if (!flock(FH, LOCK_EX)) {
-				close(FH);
-				_debug("Error: Failed to obtain an exclusive lock on $parameters{cache_file}: $!");
-				return undef;
-			}
-			if (!seek(FH, 0, 0)) {
-				flock(FH, LOCK_UN);
-				close(FH);
-				_debug("Error: Failed to seek to the beginning of $parameters{cache_file}: $!");
-				return undef;
-			}
-			$module = <FH>;
-			chomp $module;
-			if (!exists $MODULES{$module}) {
-				flock(FH, LOCK_UN);
-				close(FH);
-				_debug("cache_file $parameters{cache_file} does not appear to be a valid Weather::Underground cache file");
-				return undef;
-			}
-			elsif (!$MODULES{$module}) {
-				flock(FH, LOCK_UN);
-				close(FH);
-				_debug("cache_file $parameters{cache_file} with serialization module $module which is not installed on this machine.  Please install it or delete the cache file to start with a fresh one");
-				return undef;
-			}
+		$key =~ s![^a-z]!!g;
 
-			$cache = "";
-			$raw   = "";
-			while (<FH>) {
-				$raw .= $_;
-			}
-			flock(FH, LOCK_UN);
-			close(FH);
-
-			#
-			# Now deserialize $cache
-			#
-			if ($module eq "Data::Dumper") {
-				my $VAR1;
-				$cache = eval($raw);
-			}
-			elsif ($module eq "Storable") {
-				$cache = Storable::thaw($raw);
-			}
-			elsif ($module eq "FreezeThaw") {
-				$cache = FreezeThaw::thaw($raw);
-			}
-
-			if (ref($cache) ne "HASH") {
-				_debug("Failed to deserialize cache with module $module - [$!] [$@] got non-hashref [$cache] from raw [$raw]");
-				return undef;
-			}
-		}
-		else {
-
-			#
-			# The cache file does not exist - create new one
-			#
-			if (!open(FH, ">$parameters{cache_file}")) {
-				_debug("Error: Failed to open $parameters{cache_file} for writing: $!");
-				return undef;
-			}
-			close(FH);
-			$module = (sort grep { $MODULES{$_} } keys %MODULES)[0];
-			$cache = {};
-		}
-
-		#
-		# If we've reached here, cache_file and cache_max_age are good
-		#
-		$self->{cache_file}    = $parameters{cache_file};
-		$self->{cache_max_age} = $parameters{cache_max_age};
-		$self->{_cache_module} = $module;
-		$self->{_cache_cache}  = $cache;
-	}
-	elsif ($parameters{cache_max_age} || $parameters{cache_file}) {
-		_debug("cache_max_age or cache_file was supplied without the other - ignoring it");
-	}
-
-	bless($self, $class);
-	return $self;
+		return exists( $index->{ $key } )
+			     ? $index->{ $key }[ 2 ]
+		     	     : undef
+		;
+	};
 }
 
-sub get_weather {
-	my ($self) = @_;
-	my $document;
-	my $parser;
-	my $token;
-	my %state;
-	my $text;
-	my $arrayref = [];
-	my $oldagent;
-	local (*FH);
-
-	_debug("Getting weather info for " . $self->{place});
-
-	if ($self->{_cache_cache}) {
-
-		#
-		# We have a cache
-		#
-		_debug("Checking cache");
-		if (exists $self->{_cache_cache}->{ $self->{place} }) {
-			if ((time - $self->{_cache_cache}->{ $self->{place} }->{"time"}) <= $self->{cache_max_age}) {
-				_debug("Found in cache within cache_max_age");
-				return $self->{_cache_cache}->{ $self->{place} }->{"arrayref"};
-			}
-			else {
-				_debug("Found in cache but too old");
-			}
-		}
-	}
-
-	_debug("Retrieving url " . $self->{_url});
-
-	if ($self->{timeout}) {
-		_debug("Setting timeout for LWP::Simple's LWP::UserAgent object to $self->{timeout}");
-		$ua->timeout($self->{timeout});
-	}
-	$oldagent = $ua->agent();
-	$ua->agent("Weather::Underground version $VERSION");
-	$document = get($self->{_url});
-	$ua->agent($oldagent);
-
-	if (!$document) {
-		_debug("Could not retrieve HTML document " . $self->{_url});
-		return undef;
-	}
-	else {
-		_debug("I retrieved the following data:\n\n\n\n\n$document\n\n\n\n\n");
-	}
-
-	#
-	# Some minor cleanup to preserve our sanity and regexes:
-	#
-	$document =~ s/<\/?[bi]>//gi;
-	$document =~ s/<br>/\n/gi;
-	_debug("After cleanup, document data:\n\n\n\n\n$document\n\n\n\n\n");
-
-	_debug("Beginning parsing");
-	unless ($parser = HTML::TokeParser->new(\$document)) {
-		_debug("Failed to create parser object");
-		return undef;
-	}
-
-	if ($document =~ /observed at/i) {
-
-		#
-		# Single-location match
-		#
-
-		_debug("Single-location result detected");
-
-		while ($token = $parser->get_token) {
-			if ($token->[0] eq "T" && !$token->[2]) {
-
-				#
-				# The beginning of a text token - retrieve the whole thing and clean it up
-				#
-				$text = $token->[1] . $parser->get_text();
-				$text =~ s/&#([0-9]{1,3});/chr($1)/ge;
-				$text =~ s/&nbsp;/ /gi;
-				$text =~ s/\s+/ /g;
-				$text =~ s/^\s+//;
-				$text =~ s/\s+$//;
-				next if $text !~ /[a-z0-9]/i;
-				next if $text eq "IMG";
-
-				if ($state{"inheader"}) {
-
-					#
-					# Text in the header
-					#
-					_debug("Matched text in header [$text]");
-
-					if ($text =~ /updated\s*:?\s*(.+?)\s*$/i) {
-						_debug("Matched key UPDATED [$1]");
-						$state{"content_UPDATED"} = $1;
-					}
-					if ($text =~ /observed\s+at\s+:?\s*(.+)/i) {
-						_debug("Matched key PLACE [$1]");
-						$state{"content_PLACE"} = $1;
-					}
-
-				}
-				elsif ($state{"incontent"}) {
-
-					#
-					# This is either a header or a content, depending on the column number
-					#
-					if ($state{"contentnumber"} == 1) {
-
-						#
-						# It's a header - remember to associate the upcoming content under it
-						#
-						_debug("Read header text [$text]");
-						my $h = $text;
-						$h =~ s/\s/_/g;
-						$state{"lastcontentheader"} = uc($h);
-					}
-					else {
-
-						#
-						# It's a content - associate it with the previous header
-						#
-						_debug("Read content text [$text]");
-						if (exists $state{"content_$state{lastcontentheader}"}) {
-							$state{"content_$state{lastcontentheader}"} .= " ";
-						}
-						$state{"content_$state{lastcontentheader}"} .= $text;
-					}
-				}
-			}
-			elsif ($state{"interesting"} && $token->[0] eq "S" && uc($token->[1]) eq "TR") {
-
-				#
-				# Some interesting row starting
-				#
-				_debug("Interesting row started");
-
-				if (!$state{"inheader"} && !$state{"incontent"}) {
-
-					#
-					# First interesting row is header
-					#
-					$state{"inheader"} = 1;
-					_debug("Entered header");
-				}
-				elsif ($state{"inheader"}) {
-
-					#
-					# New row means we are no longer in header
-					#
-					$state{"inheader"}  = 0;
-					$state{"incontent"} = 1;
-					_debug("Entered first row of content");
-				}
-				else {
-
-					#
-					# A new header+content coming up
-					#
-					_debug("New content row starting");
-					$state{"contentnumber"} = 0;
-				}
-			}
-			elsif ($token->[0] eq "S" && uc($token->[1]) eq "TD" && $state{"incontent"}) {
-
-				#
-				# A new header or content cell is starting
-				#
-				_debug("New header or content cell starting");
-				$state{"contentnumber"}++;
-			}
-			# kbaucom - added checks for defined $token->[2]->{border}
-			elsif (!$state{"interesting"} && $token->[0] eq "S" && uc($token->[1]) eq "TABLE" && defined($token->[2]) && defined($token->[2]->{border}) && $token->[2]->{border} == 1) {
-
-				_debug("Entered the interesting table");
-				$state{"interesting"} = 1;
-				$state{"inheader"}    = 0;
-				$state{"incontent"}   = 0;
-			}
-			elsif ($token->[0] eq "E" && uc($token->[1]) eq "TABLE" && $state{"interesting"}) {
-
-				#
-				# Main table closed - Done parsing - save the data
-				#
-				_debug("Main table closed - end of interesting data");
-				_state2result(\%state, $arrayref);
-
-				#
-				# No need to keep going - it's only 1 location
-				#
-				last;
-			}
-		}
-	}
-	else {
-
-		#
-		# Multi-location match
-		#
-		_debug("Multi-location result detected");
-
-		while ($token = $parser->get_token) {
-
-			if ($token->[0] eq "T" && !$token->[2] && $state{"interesting"}) {
-
-				#
-				# The beginning of a text token - retrieve the whole thing and clean it up
-				#
-				$text = $token->[1] . $parser->get_text();
-				$text =~ s/&#([0-9]{1,3});/chr($1)/ge;
-				$text =~ s/&nbsp;/ /gi;
-				next if $text !~ /[a-z0-9]/i;
-				$text =~ s/^\s+//g;
-				$text =~ s/\s+$//g;
-				$text =~ s/\s+/ /g;
-
-				if ($state{"incontent"}) {
-
-					#
-					# This is content we're interested in - store it under the header title of the same column number
-					#
-					_debug("Content text read [$text]");
-					if (exists $state{"content"}) {
-						$state{"content"} .= ":";
-					}
-					$state{"content"} .= $text;
-				}
-
-			}
-			elsif (!$state{"interesting"} && $token->[0] eq "S" && uc($token->[1]) eq "TABLE") {
-				$state{"tablenumber"}++;
-				if ($state{"tablenumber"} == 2) {
-
-					#
-					# Second table is where the data is
-					#
-					_debug("Entered interesting table");
-					$state{"interesting"} = 1;
-				}
-			}
-			elsif ($state{"interesting"} && $token->[0] eq "S" && uc($token->[1]) eq "TR") {
-
-				_debug("Interesting row started");
-
-				if (!$state{"inheader"} && !$state{"incontent"}) {
-					_debug("Entered header");
-					$state{"inheader"} = 1;
-				}
-				elsif ($state{"inheader"}) {
-					_debug("Entered content");
-					$state{"inheader"}  = 0;
-					$state{"incontent"} = 1;
-				}
-			}
-			elsif ($state{"incontent"} && $token->[0] eq "E" && uc($token->[1]) eq "TR") {
-
-				#
-				# End of a content row
-				#
-				_debug("End of a content row.  Parsing [$state{content}].");
-				($state{"content_PLACE"})       = $state{"content"} =~ /^(.+?)\s*:/;
-				($state{"content_TEMPERATURE"}) = $state{"content"} =~ /\s*:\s*(.+)$/;
-				delete $state{"content"};
-				_state2result(\%state, $arrayref);
-			}
-			elsif ($state{"interesting"} && $token->[0] eq "E" && uc($token->[1]) eq "TABLE") {
-
-				#
-				# The table that has the data is finished - no need to keep parsing
-				#
-				_debug("End of table while we're in table - we're done");
-				last;
-			}
-		}
-
-	}
-
-	if (!@$arrayref) {
-		_debug("No matching places found");
-		return undef;
-	}
-	else {
-		if ($self->{cache_file}) {
-
-			#
-			# Let's save the result into the cache_file before we return it
-			#
-			_debug("Saving results into cache_file $self->{cache_file}");
-
-			$self->{_cache_cache}->{ $self->{place} } = {
-				"time"     => time,
-				"arrayref" => $arrayref,
-			};
-			if (open(FH, ">$self->{cache_file}")) {
-				if (flock(FH, LOCK_EX)) {
-					if (seek(FH, 0, 0)) {
-						print FH $self->{_cache_module};
-						print FH "\n";
-						if ($self->{_cache_module} eq "Data::Dumper") {
-							print FH Data::Dumper::Dumper($self->{_cache_cache});
-						}
-						elsif ($self->{_cache_module} eq "Storable") {
-							print FH Storable::freeze($self->{_cache_cache});
-						}
-						elsif ($self->{_cache_module} eq "FreezeThaw") {
-							print FH FreezeThaw::freeze($self->{_cache_cache});
-						}
-						flock(FH, LOCK_UN);
-						close(FH);
-					}
-					else {
-						_debug("Error: Failed to seek to beginning of cache_file $self->{cache_file}: $!");
-					}
-				}
-				else {
-					_debug("Error: Failed to lock cache_file $self->{cache_file} exclusively: $!");
-				}
-			}
-			else {
-				_debug("Error: Failed to open cache_file $self->{cache_file} for writing: $!");
-			}
-
-		}
-		return $arrayref;
-	}
-
-}
-
-##################################################################################################################################
-#
-# Internal subroutines
-#
-sub _debug {
-	my $notice = shift;
-	$@ = $notice;
-	if ($DEBUG) {
-		print "$MYNAME DEBUG NOTE: $notice\n";
-		return 1;
-	}
-	return 0;
-}
-
-sub _state2result {
-	my $stateref = shift;
-	my $arrayref = shift;
-	my ($temperature_fahrenheit, $temperature_celsius);
-	my ($dewpoint_fahrenheit,    $dewpoint_celsius);
-	my ($visibility_miles,       $visibility_kilometers);
-	my ($wind_direction,         $wind_milesperhour, $wind_kilometersperhour);
-
-	#
-	# Avoid some silly warnings of unitialized values
-	#
-	foreach (qw(content_PLACE content_UPDATED content_TEMPERATURE content_HUMIDITY content_DEW_POINT content_WIND content_PRESSURE content_CONDITIONS content_VISIBILITY content_CLOUDS content_SUNRISE content_SUNSET content_MOON_RISE content_MOON_SET content_MOON_PHASE)) {
-		exists($stateref->{$_}) or ($stateref->{$_} = "");
-	}
-
-	$stateref->{"content_TEMPERATURE"} =~ s/\s//g;
-	# kbaucom - updated temperature regex
-	($temperature_celsius)    = ($stateref->{"content_TEMPERATURE"} =~ /(-?(?:\d|\.)+)(?:&deg;)?[^a-z0-9]*?c/i);
-	($temperature_fahrenheit) = ($stateref->{"content_TEMPERATURE"} =~ /(-?(?:\d|\.)+)(?:&deg;)?[^a-z0-9]*?f/i);
-	if (!length($temperature_celsius) && length($temperature_fahrenheit)) {
-		$temperature_celsius = ($temperature_fahrenheit - 32) / 1.8;
-	}
-	elsif (!length($temperature_fahrenheit) && length($temperature_celsius)) {
-		$temperature_fahrenheit = ($temperature_celsius * 1.8) + 32;
-	}
-
-	$stateref->{"content_DEW_POINT"} =~ s/\s//g;
-	# kbaucom - updated dewpoint regex
-	($dewpoint_celsius)    = ($stateref->{"content_DEW_POINT"} =~ /(-?(?:\d|\.)+)(?:&deg;)?[^a-z0-9]*?c/i);
-	($dewpoint_fahrenheit) = ($stateref->{"content_DEW_POINT"} =~ /(-?(?:\d|\.)+)(?:&deg;)?[^a-z0-9]*?f/i);
-	if (!length($dewpoint_celsius) && length($dewpoint_fahrenheit)) {
-		$dewpoint_celsius = ($dewpoint_fahrenheit - 32) / 1.8;
-	}
-	elsif (!length($dewpoint_fahrenheit) && length($dewpoint_celsius)) {
-		$dewpoint_fahrenheit = ($dewpoint_celsius * 1.8) + 32;
-	}
-
-	$stateref->{"content_VISIBILITY"} =~ s/\s//g;
-	($visibility_miles)      = ($stateref->{"content_VISIBILITY"} =~ /([0-9.]+)[^a-z0-9]*?m/i);
-	($visibility_kilometers) = ($stateref->{"content_VISIBILITY"} =~ /([0-9.]+)[^a-z0-9]*?k/i);
-	if(!defined($visibility_miles) && !defined($visibility_kilometers)) {
-		$visibility_miles = $visibility_kilometers = '';
-	}
-	else {
-		if (!length($visibility_miles) && length($visibility_kilometers)) {
-			$visibility_miles = $visibility_kilometers * 0.621371192;
-		}
-		elsif (!length($visibility_kilometers) && length($visibility_miles)) {
-			$visibility_kilometers = $visibility_miles * 1.609344;
-		}
-	}
-
-	$stateref->{"content_HUMIDITY"} =~ s/[^0-9]//g;
-
-	($wind_direction) = $stateref->{"content_WIND"} =~ /^([a-z -]+?)\s+(at|[0-9])/i;
-	$stateref->{"content_WIND"} =~ s/\s//g;
-	($wind_milesperhour)      = ($stateref->{"content_WIND"} =~ /([0-9.]+)[^a-z0-9]*?mp/i);
-	($wind_kilometersperhour) = ($stateref->{"content_WIND"} =~ /([0-9.]+)[^a-z0-9]*?km/i);
-	if (!length($wind_milesperhour) && length($wind_kilometersperhour)) {
-		$wind_milesperhour = $wind_kilometersperhour * 0.621371192;
-	}
-	elsif (!length($wind_kilometersperhour) && length($wind_milesperhour)) {
-		$wind_kilometersperhour = $wind_milesperhour * 1.609344;
-	}
-
-	push(
-		@$arrayref,
-		{
-			place                  => $stateref->{"content_PLACE"},
-			updated                => $stateref->{"content_UPDATED"},
-			temperature_celsius    => $temperature_celsius,
-			temperature_fahrenheit => $temperature_fahrenheit,
-			celsius                => $temperature_celsius,                # Legacy
-			fahrenheit             => $temperature_fahrenheit,             # Legacy
-			humidity               => $stateref->{"content_HUMIDITY"},
-			dewpoint_celsius       => $dewpoint_celsius,
-			dewpoint_fahrenheit    => $dewpoint_fahrenheit,
-			wind_direction         => $wind_direction,
-			wind_milesperhour      => $wind_milesperhour,
-			wind_kilometersperhour => $wind_kilometersperhour,
-			pressure               => $stateref->{"content_PRESSURE"},
-			conditions             => $stateref->{"content_CONDITIONS"},
-			visibility_miles       => $visibility_miles,
-			visibility_kilometers  => $visibility_kilometers,
-			clouds                 => $stateref->{"content_CLOUDS"},
-			sunrise                => $stateref->{"content_SUNRISE"},
-			sunset                 => $stateref->{"content_SUNSET"},
-			moonrise               => $stateref->{"content_MOON_RISE"},
-			moonset                => $stateref->{"content_MOON_SET"},
-			moonphase              => $stateref->{"content_MOON_PHASE"},
-		}
-	);
-
-}
-
-#
-# Leave me alone:
-#
 1;
+
+=head1 NAME
+
+Compass::Points - Convert between compass point names, abbreviations and values
+
+=head1 SYNOPSIS
+
+  use Compass::Points;
+  my $points = Compass::Points->new();
+  my $deg = $points->abbr2deg( "NNE" );
+
+=head1 DESCRIPTION
+
+This module converts compass point names and abbreviations to degrees
+and vice versa.
+It supports four different compass point systems: 4, 8, 16 and 32.
+The default is 16 and can be used for wind compass usage.
+
+=head1 METHODS
+
+=head2 new( [ $points ] )
+
+Returns a Compass::Points object for the number of points (defaults to 16).
+
+=head2 deg2abbr( $degree )
+
+Takes a degree value and returns the corresponding abbreviation for the
+matching wind name.
+
+=head2 deg2name( $degree )
+
+Same as deg2abbr() but returns the full wind name.
+
+=head2 abbr2deg( $abbreviation )
+
+Given a wind name abbreviation returns the degree of the points object.
+
+=head2 name2deg( $name )
+
+Same as abbr2deg() but takes full wind names.
+
+=head1 SEE ALSO
+
+L<http://en.wikipedia.org/wiki/Points_of_the_compass>
+
+=head1 AUTHOR
+
+Simon Bertrang, E<lt>janus@cpan.orgE<gt>
+
+=head1 COPYRIGHT AND LICENSE
+
+Copyright (C) 2014 by Simon Bertrang
+
+This library is free software; you can redistribute it and/or modify
+it under the same terms as Perl itself.
+
+=cut
 }
