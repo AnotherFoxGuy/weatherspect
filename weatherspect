@@ -271,7 +271,7 @@ sub toggle_weather_report {
 	# find the widest piece of info
 	my $value_width = 35;
 	foreach my $value ($current->{'conditions'}, $current->{'place'}, $current->{'clouds'}) {
-		if(length($value) > $value_width) {
+		if(length($value) > ($value_width)) {
 			$value_width = length($value);
 		}
 	}
